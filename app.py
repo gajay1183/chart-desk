@@ -83,18 +83,23 @@ def chart():
     if df.empty:
         st.error(f"No data for {sym}. Check the symbol (NSE stocks need .NS, added automatically).")
         return
-    last, prev = df.Close.iloc[-1], df.Close.iloc[-2] if len(df) > 1 else df.Close.iloc[-1]
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Last", f"{last:,.2f}", f"{(last / prev - 1) * 100:+.2f}%")
-    m2.metric("High", f"{df.High.iloc[-1]:,.2f}")
-    m3.metric("Low", f"{df.Low.iloc[-1]:,.2f}")
-    m4.metric("Updated", df.index[-1].strftime("%d %b %H:%M"))
+    days = df.index.normalize()
+    today = df[days == days[-1]]
+    before = df.Close[days < days[-1]]
+    last = df.Close.iloc[-1]
+    prev = before.iloc[-1] if len(before) else df.Open.iloc[0]
+    chg = (last / prev - 1) * 100
+    col = "green" if chg >= 0 else "red"
+    st.markdown(f"### {last:,.2f} :{col}[{chg:+.2f}%]")
+    st.caption(f"Day H {today.High.max():,.2f} · L {today.Low.min():,.2f} · Updated {df.index[-1].strftime('%d %b %H:%M')}")
 
     c = df.Close
     show_rsi, show_macd = "RSI" in ind, "MACD" in ind
     rows = 1 + show_rsi + show_macd
     heights = [0.6] + [0.2] * (rows - 1)
-    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.02, row_heights=heights)
+    specs = [[{"secondary_y": True}]] + [[{}] for _ in range(rows - 1)]
+    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+                        row_heights=heights, specs=specs)
 
     src = heikin(df) if ctype == "Heikin-Ashi" else df
     if ctype == "Line":
@@ -120,9 +125,10 @@ def chart():
         fig.add_scatter(x=df.index, y=vw, name="VWAP", line=dict(color="#e8590c", width=1.5), row=1, col=1)
     if "Volume" in ind:
         col = np.where(df.Close >= df.Open, "rgba(18,145,95,.35)", "rgba(210,63,63,.35)")
-        fig.add_bar(x=df.index, y=df.Volume, name="Volume", marker_color=col, yaxis="y2", showlegend=False)
-        fig.update_layout(yaxis2=dict(overlaying="y", side="right", showgrid=False,
-                                      range=[0, df.Volume.max() * 5], visible=False))
+        fig.add_bar(x=df.index, y=df.Volume, name="Volume", marker_color=col, showlegend=False,
+                    row=1, col=1, secondary_y=True)
+        fig.update_yaxes(range=[0, df.Volume.max() * 5], visible=False, showgrid=False,
+                         secondary_y=True, row=1, col=1)
     for v in [x for x in levels.replace(" ", "").split(",") if x]:
         try:
             fig.add_hline(y=float(v), line_dash="dash", line_color="#2f5bea", row=1, col=1)
@@ -133,6 +139,7 @@ def chart():
         fig.add_scatter(x=df.index, y=rsi(c), name="RSI 14", line=dict(color="#a259ff"), row=r, col=1)
         for lvl in (70, 30):
             fig.add_hline(y=lvl, line_dash="dot", line_color="#7a8aa0", row=r, col=1)
+        fig.update_yaxes(range=[0, 100], row=r, col=1)
         r += 1
     if show_macd:
         macd = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
@@ -147,9 +154,9 @@ def chart():
     if interval in ("1m", "5m", "15m", "1h"):
         breaks.append(dict(bounds=[15.5, 9.25], pattern="hour"))
     fig.update_xaxes(rangebreaks=breaks, rangeslider_visible=False)
-    fig.update_layout(height=640 if rows > 1 else 520, margin=dict(l=8, r=8, t=10, b=8),
-                      legend=dict(orientation="h", y=1.02), hovermode="x unified", dragmode="pan")
-    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displaylogo": False})
+    fig.update_layout(height=560 if rows > 1 else 460, margin=dict(l=8, r=8, t=10, b=8),
+                      legend=dict(orientation="h", y=1.0, yanchor="bottom", font=dict(size=10)), hovermode="x unified", dragmode="pan")
+    st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": False})
     st.caption("Data: Yahoo Finance via yfinance, delayed up to ~15 min for NSE. Not investment advice.")
 
 
